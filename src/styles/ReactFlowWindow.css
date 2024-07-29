@@ -1,0 +1,35 @@
+
+.delete-icon {
+  transition: transform 0.2s ease-in-out;
+}
+
+.delete-icon.hidden {
+  transform: scale(0);
+}
+
+.delete-icon.visible {
+  transform: scale(1);
+}
+
+.react-flow__node:hover {
+  background-color: #cccccc;
+  /* Firefox */
+  -moz-transition: background-color 0.2s linear;
+  /* WebKit */
+  -webkit-transition: background-color 0.2s linear;
+  /* Opera */
+  -o-transition: background-color 0.2s linear;
+  /* Standard */
+  transition: background-color 0.2s linear;
+}
+
+.react-flow__node-node-with-toolbar, .react-flow__node-input-node-with-toolbar, .react-flow__node-output-node-with-toolbar {
+  padding: 10px;
+  border-radius: var(--xy-node-border-radius, var(--xy-node-border-radius-default));
+  width: 150px;
+  font-size: 12px;
+  color: var(--xy-node-color, var(--xy-node-color-default));
+  text-align: center;
+  border: var(--xy-node-border, var(--xy-node-border-default));
+  background-color: var(--xy-node-background-color, var(--xy-node-background-color-default));
+}
