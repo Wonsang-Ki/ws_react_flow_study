@@ -1,4 +1,4 @@
-import ReactFlowWindow from "../components/ReactFlowWindow";
+import ReactFlowWindow from "../components/CustomReactFlow/ReactFlowWindow";
 import { Allotment } from 'allotment';
 import '../styles/Root.css';
 import "allotment/dist/style.css";
