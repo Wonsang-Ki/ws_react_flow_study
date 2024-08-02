@@ -17,7 +17,7 @@ import {
   getConnectedEdges,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useCallback, useState, useRef, useEffect } from "react";
+import { useCallback, useState, useRef, useEffect, useMemo } from "react";
 import { Button } from "@blueprintjs/core";
 import "../../styles/ReactFlowWindow.css";
 import { Allotment } from "allotment";
@@ -73,13 +73,10 @@ function ReactFlowWindow() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [maxNodeId, setMaxNodeId] = useState(initialNodes.length);
-
   const ref = useRef();
   const [rfInstance, setRfInstance] = useState(null);
-
   const { getEdge, getNode } = useReactFlow();
-
-  let [jsonData, setJsonData] = useState("");
+  const [jsonData, setJsonData] = useState("");
 
   const onConnect = useCallback(
     (params) =>
@@ -89,105 +86,7 @@ function ReactFlowWindow() {
     [setEdges]
   );
 
-  const onAddEdgeClick = useCallback(
-    (edgeId) => {
-      setMaxNodeId((prevMaxNodeId) => {
-        const newMaxNodeId = prevMaxNodeId + 1;
-        console.log("Updating maxNodeId to:", newMaxNodeId);
-
-        const oldSourceNode = getNode(getEdge(edgeId).source);
-        const oldTargetNode = getNode(getEdge(edgeId).target);
-
-        const newTargetNode = {
-          id: newMaxNodeId.toString(),
-          type: "mid-node",
-          data: { label: `Node ${newMaxNodeId.toString()}` },
-          style: { width: "200px", height: "50px" },
-          draggable: false,
-          position: {
-            x: oldSourceNode.position.x,
-            y: oldSourceNode.position.y + 100,
-          },
-        };
-
-        setNodes((nds) => nds.concat(newTargetNode));
-
-        setEdges((eds) =>
-          eds.concat({
-            source: oldSourceNode.id,
-            target: newTargetNode.id,
-            type: "add-edge",
-            id: `xy-edge__${oldSourceNode.id}-${newTargetNode.id}`,
-            deletable: false,
-            data: {
-              onAddEdgeClick: onAddEdgeClick,
-            },
-          })
-        );
-
-        setEdges((eds) =>
-          eds.map((edge) => {
-            if (edge.id === edgeId) {
-              return {
-                ...edge,
-                source: newTargetNode.id,
-                target: oldTargetNode.id,
-                id: `xy-edge__${newTargetNode.id}-${oldTargetNode.id}`,
-                deletable: false,
-                data: {
-                  onAddEdgeClick: onAddEdgeClick,
-                },
-              };
-            }
-            return edge;
-          })
-        );
-
-        setNodes((nds) => // useState 로 아직 반영되기 전이라 getChildrenNodes 에서 사용하는 nodes에선 아직 새로운 노드 정보를 가져올 수 없는 거 같음.
-          nds.map((node) => {
-            if (
-              node.position.y > oldSourceNode.position.y &&
-              node.id !== newTargetNode.id
-            ) {
-              return {
-                ...node,
-                position: {
-                  x:
-                    node.type === "mid-node"
-                      ? newTargetNode.position.x
-                      : node.position.x,
-                  y: node.position.y + 100,
-                },
-              };
-            }
-            return node;
-          })
-        );
-        return newMaxNodeId;
-
-      });
-    },
-    [getEdge, getNode, setEdges, setNodes]
-  );
-
-  const initialEdges = [
-    {
-      source: "1",
-      target: "2",
-      type: "add-edge",
-      id: "xy-edge__1-2",
-      deletable: false,
-      data: {
-        onAddEdgeClick: onAddEdgeClick,
-      },
-    },
-  ];
-
-  useState(() => {
-    setEdges(initialEdges);
-  }, [setEdges, onAddEdgeClick]);
-
-  const addNode = () => {
+  const addNode = useCallback(() => {
     setMaxNodeId((prevMaxNodeId) => {
       const newMaxNodeId = prevMaxNodeId + 1;
       const newNode = {
@@ -199,88 +98,156 @@ function ReactFlowWindow() {
       setNodes((nds) => nds.concat(newNode));
       return newMaxNodeId;
     });
-  };
+  }, [setNodes]);
 
-  const getChildrenNodes = (nodeId) => {
-    return nodes.filter((node) => node.position.y > getNodeById(nodeId).position.y && node.id !== nodeId);
-  };
+  const getChildrenNodes = useCallback(
+    (nodeId) => {
+      const node = getNode(nodeId);
+      return nodes.filter(
+        (n) => n.position.y > node.position.y && n.id !== nodeId
+      );
+    },
+    [nodes, getNode]
+  );
+
+  const moveNode = useCallback(
+    (nodeId, x, y) => {
+      setNodes((nds) =>
+        nds.map((node) => {
+          if (node.id === nodeId) {
+            return {
+              ...node,
+              position: {
+                x: node.position.x + x,
+                y: node.position.y + y,
+              },
+            };
+          }
+          return node;
+        })
+      );
+    },
+    [setNodes]
+  );
+
+  const onAddEdgeClick = useCallback(
+    (edgeId) => {
+      setMaxNodeId((prevMaxNodeId) => {
+        const newMaxNodeId = prevMaxNodeId + 1;
+
+        const oldSourceNode = getNode(getEdge(edgeId).source);
+        const oldTargetNode = getNode(getEdge(edgeId).target);
+
+        const newTargetNode = {
+          id: newMaxNodeId.toString(),
+          type: "mid-node",
+          data: { label: `Node ${newMaxNodeId}` },
+          style: { width: "200px", height: "50px" },
+          draggable: false,
+          position: {
+            x: oldSourceNode.position.x,
+            y: oldSourceNode.position.y + 100,
+          },
+        };
+
+        setNodes((nds) => nds.concat(newTargetNode));
+
+        setEdges((eds) => [
+          ...eds,
+          {
+            source: oldSourceNode.id,
+            target: newTargetNode.id,
+            type: "add-edge",
+            id: `xy-edge__${oldSourceNode.id}-${newTargetNode.id}`,
+            deletable: false,
+            data: { onAddEdgeClick },
+          },
+        ]);
+
+        setEdges((eds) =>
+          eds.map((edge) => {
+            if (edge.id === edgeId) {
+              return {
+                ...edge,
+                source: newTargetNode.id,
+                target: oldTargetNode.id,
+                id: `xy-edge__${newTargetNode.id}-${oldTargetNode.id}`,
+                deletable: false,
+                data: { onAddEdgeClick },
+              };
+            }
+            return edge;
+          })
+        );
+
+        setNodes((nds) =>
+          nds.map((node) => {
+            if (
+              node.position.y > oldSourceNode.position.y &&
+              node.id !== newTargetNode.id
+            ) {
+              return {
+                ...node,
+                position: {
+                  x: node.type === "mid-node" ? newTargetNode.position.x : node.position.x,
+                  y: node.position.y + 100,
+                },
+              };
+            }
+            return node;
+          })
+        );
+
+        return newMaxNodeId;
+      });
+    },
+    [getEdge, getNode, setEdges, setNodes]
+  );
 
   const onNodesDelete = useCallback(
-    (deletedNode) => {
-      setEdges(
-        deletedNode.reduce((acc, node) => {
-          const incomers = getIncomers(node, nodes, edges);
-          const outgoers = getOutgoers(node, nodes, edges);
-          const connectedEdges = getConnectedEdges([node], edges);
-
-          const remainingEdges = acc.filter(
-            (edge) => !connectedEdges.includes(edge)
-          );
-
-          const createdEdges = incomers.flatMap(({ id: source }) =>
-            outgoers.map(({ id: target }) => {
-            
-            getChildrenNodes(source).forEach((childNode) => {
-              console.log(childNode.id);
-              moveNode(childNode.id, 0, -100);
-            })
-
-            return{
-              source,
-              target,
-              type: "add-edge",
-              id: `xy-edge__${source}-${target}`,
-              deletable: false,
-              data: {
-                onAddEdgeClick: onAddEdgeClick,
-              },
-            }
-          })
-          );
-
-          return [...remainingEdges, ...createdEdges];
-        }, edges)
+    (deletedNodes) => {
+      setEdges((eds) =>
+        eds.reduce((acc, edge) => {
+          const deletedIds = new Set(deletedNodes.map((n) => n.id));
+          if (!deletedIds.has(edge.source) && !deletedIds.has(edge.target)) {
+            return [...acc, edge];
+          }
+          return acc;
+        }, [])
       );
 
+      deletedNodes.forEach((node) => {
+        const incomers = getIncomers(node, nodes, edges);
+        const outgoers = getOutgoers(node, nodes, edges);
 
+        incomers.forEach((inNode) => {
+          getChildrenNodes(inNode.id).forEach((childNode) => {
+            moveNode(childNode.id, 0, -100);
+          });
+        });
+
+        setEdges((eds) =>
+          eds.concat(
+            incomers.flatMap(({ id: source }) =>
+              outgoers.map(({ id: target }) => ({
+                source,
+                target,
+                type: "add-edge",
+                id: `xy-edge__${source}-${target}`,
+                deletable: false,
+                data: { onAddEdgeClick },
+              }))
+            )
+          )
+        );
+      });
     },
-    [nodes, edges]
+    [nodes, edges, onAddEdgeClick, getChildrenNodes, moveNode]
   );
-  
-  const getNodeById = (nodeId) => {
-    return nodes.find((node) => node.id === nodeId);
-  }
-
-  const moveNode = (nodeId, x, y) => {
-    const selectedNode = getNodeById(nodeId);
-
-    if (!selectedNode) {
-      console.error(`Node with id ${nodeId} not found`);
-      return;
-    }
-  
-    setNodes((nodes) =>
-      nodes.map((node) => {
-        if(node.id === selectedNode.id) {
-          
-          return {
-            ...node,
-            position: {
-              x: selectedNode.position.x + x,
-              y: selectedNode.position.y + y,
-            },
-          };
-        }
-        return node;
-      })
-    );
-  }
 
   const exportToJson = useCallback(() => {
-    console.log(rfInstance);
     if (rfInstance) {
       const flow = rfInstance.toObject();
-      console.log(JSON.stringify(flow));
       setJsonData(JSON.stringify(flow));
     }
   }, [rfInstance]);
@@ -289,23 +256,33 @@ function ReactFlowWindow() {
     ref.current.resize([100, 100]);
   };
 
+  const initialEdges = useMemo(
+    () => [
+      {
+        source: "1",
+        target: "2",
+        type: "add-edge",
+        id: "xy-edge__1-2",
+        deletable: false,
+        data: { onAddEdgeClick },
+      },
+    ],
+    [onAddEdgeClick]
+  );
+
+  useEffect(() => {
+    setEdges(initialEdges);
+  }, [initialEdges, setEdges]);
+
   return (
     <div style={{ height: "100%", width: "100%" }}>
       <Allotment ref={ref} defaultSizes={[100, 0]}>
-        <Allotment.Pane
-          className="split-left-view"
-          minSize={50}
-          style={{ height: "50px" }}
-        >
+        <Allotment.Pane className="split-left-view" minSize={50} style={{ height: "50px" }}>
           <ReactFlow
             nodes={nodes}
             edges={edges}
-            onNodeClick={(event, node) => {
-              showNodeInfo(node);
-            }}
-            onPaneClick={(event) => {
-              ref.current.resize([100, 0]);
-            }}
+            onNodeClick={(event, node) => showNodeInfo(node)}
+            onPaneClick={() => ref.current.resize([100, 0])}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onNodesDelete={onNodesDelete}
@@ -319,15 +296,14 @@ function ReactFlowWindow() {
             <MiniMap />
             <Controls />
             <Background variant={BackgroundVariant.Cross} />
-
             <Button
               icon="add"
               intent="primary"
               onClick={addNode}
               style={{
-                position: "relative",
-                float: "right",
-                margin: "10px",
+                position: "absolute",
+                right: 10,
+                top: 10,
                 zIndex: 1000,
               }}
             >
@@ -337,33 +313,19 @@ function ReactFlowWindow() {
               intent="primary"
               onClick={exportToJson}
               style={{
-                position: "relative",
-                float: "right",
-                margin: "10px",
+                position: "absolute",
+                right: 10,
+                top: 50,
                 zIndex: 1000,
               }}
             >
-              export to json
+              Export to JSON
             </Button>
           </ReactFlow>
         </Allotment.Pane>
-        <Allotment.Pane
-          className="split-right-view"
-          minSize={0}
-          maxSize={500}
-          style={{ overflow: "auto" }}
-        >
-          <div>
-            <div
-              className="menu-bar"
-              style={{ overflow: "auto", height: "auto" }}
-            >
-              <JSONPretty
-                id="json-pretty"
-                data={jsonData}
-                style={{ overflow: "auto", height: "auto" }}
-              ></JSONPretty>
-            </div>
+        <Allotment.Pane className="split-right-view" minSize={0} maxSize={500} style={{ overflow: "auto" }}>
+          <div className="menu-bar" style={{ overflow: "auto", height: "auto" }}>
+            <JSONPretty id="json-pretty" data={jsonData} style={{ overflow: "auto", height: "auto" }}></JSONPretty>
           </div>
         </Allotment.Pane>
       </Allotment>
