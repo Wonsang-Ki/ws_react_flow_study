@@ -1,5 +1,4 @@
 import React from 'react';
-import CircularIcon from '../../CircularIcon';
 import {
   Handle,
   Position

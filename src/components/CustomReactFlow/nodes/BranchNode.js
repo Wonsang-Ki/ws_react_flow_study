@@ -1,23 +1,8 @@
 
-
-function ParentsNode() {
-  return (
-    <>
-    </>
-  );
-}
-
-function ChildrenNode() {
-  return (
-    <>
-    </>
-  );
-}
-
 function BranchNode() {
   return (
-    <>
-    </>
+    <div className = "branch-node">
+    </div>
   );
 }
 

@@ -2,6 +2,7 @@ import {
   ReactFlow,
   addEdge,
   Background,
+  Panel,
   BackgroundVariant,
   Controls,
   MiniMap,
@@ -11,10 +12,8 @@ import {
   MarkerType,
   getIncomers,
   getOutgoers,
-  Handle,
-  Position,
   useReactFlow,
-  getConnectedEdges,
+  BaseEdge,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useCallback, useState, useRef, useEffect, useMemo } from "react";
@@ -34,7 +33,6 @@ const initialNodes = [
     id: "1",
     type: "start-node",
     data: { label: "Start Node" },
-    draggable: false,
     deletable: false,
     style: { width: "200px", height: "40px" },
     position: { x: 0, y: 0 },
@@ -43,7 +41,6 @@ const initialNodes = [
     id: "2",
     type: "dummy-end-node",
     data: { label: "End Node" },
-    draggable: false,
     deletable: false,
     style: { borderRadius: "50%", width: "35px", height: "35px" },
     position: { x: 82.5, y: 100 },
@@ -57,6 +54,7 @@ const nodeTypes = {
 };
 
 const edgeTypes = {
+  "default-edge": BaseEdge,
   "add-edge": AddEdge,
   "add-with-branch-edge": AddWithBranchEdge,
 };
@@ -75,7 +73,7 @@ function ReactFlowWindow() {
   const [maxNodeId, setMaxNodeId] = useState(initialNodes.length);
   const ref = useRef();
   const [rfInstance, setRfInstance] = useState(null);
-  const { getEdge, getNode } = useReactFlow();
+  const { getEdge, getNode, getEdges } = useReactFlow();
   const [jsonData, setJsonData] = useState("");
 
   const onConnect = useCallback(
@@ -86,29 +84,39 @@ function ReactFlowWindow() {
     [setEdges]
   );
 
-  const addNode = useCallback(() => {
-    setMaxNodeId((prevMaxNodeId) => {
-      const newMaxNodeId = prevMaxNodeId + 1;
-      const newNode = {
-        id: newMaxNodeId.toString(),
-        data: { label: `Node ${newMaxNodeId}` },
-        type: "mid-node",
-        position: { x: Math.random() * 400, y: Math.random() * 400 },
-      };
-      setNodes((nds) => nds.concat(newNode));
-      return newMaxNodeId;
-    });
-  }, [setNodes]);
-
-  const getChildrenNodes = useCallback(
-    (nodeId) => {
-      const node = getNode(nodeId);
-      return nodes.filter(
-        (n) => n.position.y > node.position.y && n.id !== nodeId
-      );
+  const addNode = useCallback(
+    (nodeJson) => {
+      setMaxNodeId((prevMaxNodeId) => {
+        const newMaxNodeId = prevMaxNodeId + 1;
+        const newNode = nodeJson;
+        setNodes((nds) => nds.concat(newNode));
+        return newMaxNodeId;
+      });
     },
-    [nodes, getNode]
+    [setNodes]
   );
+
+  const getChildrenNodes = (nodeId, nodes, edges) => {
+    const children = new Set();
+
+    const findChildren = (currentNodeId) => {
+      edges
+        .filter((edge) => edge.source === currentNodeId)
+        .forEach((edge) => {
+          if (edge.target !== undefined) {
+            const childNode = nodes.find((node) => node.id === edge.target);
+            if (childNode !== undefined) {
+              children.add(childNode.id);
+              findChildren(childNode.id);
+            }
+          }
+        });
+    };
+
+    findChildren(nodeId);
+
+    return Array.from(children);
+  };
 
   const moveNode = useCallback(
     (nodeId, x, y) => {
@@ -131,78 +139,314 @@ function ReactFlowWindow() {
   );
 
   const onAddEdgeClick = useCallback(
-    (edgeId) => {
+    (edgeId, nodeDataType) => {
       setMaxNodeId((prevMaxNodeId) => {
-        const newMaxNodeId = prevMaxNodeId + 1;
+        let newMaxNodeId = prevMaxNodeId;
 
         const oldSourceNode = getNode(getEdge(edgeId).source);
         const oldTargetNode = getNode(getEdge(edgeId).target);
 
-        const newTargetNode = {
-          id: newMaxNodeId.toString(),
-          type: "mid-node",
-          data: { label: `Node ${newMaxNodeId}` },
-          style: { width: "200px", height: "50px" },
-          draggable: false,
-          position: {
-            x: oldSourceNode.position.x,
-            y: oldSourceNode.position.y + 100,
-          },
-        };
-
-        setNodes((nds) => nds.concat(newTargetNode));
-
-        setEdges((eds) => [
-          ...eds,
-          {
-            source: oldSourceNode.id,
-            target: newTargetNode.id,
-            type: "add-edge",
-            id: `xy-edge__${oldSourceNode.id}-${newTargetNode.id}`,
-            deletable: false,
-            data: { onAddEdgeClick },
-          },
-        ]);
-
-        setEdges((eds) =>
-          eds.map((edge) => {
-            if (edge.id === edgeId) {
-              return {
-                ...edge,
-                source: newTargetNode.id,
-                target: oldTargetNode.id,
-                id: `xy-edge__${newTargetNode.id}-${oldTargetNode.id}`,
-                deletable: false,
-                data: { onAddEdgeClick },
-              };
-            }
-            return edge;
-          })
-        );
-
-        setNodes((nds) =>
-          nds.map((node) => {
-            if (
-              node.position.y > oldSourceNode.position.y &&
-              node.id !== newTargetNode.id
-            ) {
-              return {
-                ...node,
-                position: {
-                  x: node.type === "mid-node" ? newTargetNode.position.x : node.position.x,
-                  y: node.position.y + 100,
-                },
-              };
-            }
-            return node;
-          })
-        );
+        if (nodeDataType === "Logic") {
+          newMaxNodeId = addLogicNode(
+            newMaxNodeId,
+            oldSourceNode,
+            oldTargetNode,
+            edgeId
+          );
+        } else if ([].includes(nodeDataType)) { // 타겟노드 없이 끝나는 노드 타입 추가, 단 중간에 생성될 수 없음 (oldTargetNode의 타겟이 항상 DummyEndNode)
+          if(oldTargetNode.type !== "dummy-end-node") {
+            console.log("Invalid nodeDataType");
+            return newMaxNodeId;
+          } else {
+            newMaxNodeId = addEndNode(
+              newMaxNodeId,
+              oldSourceNode,
+              oldTargetNode,
+              edgeId,
+              nodeDataType
+            );
+          }
+        } else {
+          newMaxNodeId = addNormalNode(
+            newMaxNodeId,
+            oldSourceNode,
+            oldTargetNode,
+            edgeId,
+            nodeDataType
+          );
+        }
 
         return newMaxNodeId;
       });
     },
-    [getEdge, getNode, setEdges, setNodes]
+    [getEdge, getNode, setNodes]
   );
+
+  const addNormalNode = (
+    newMaxNodeId,
+    oldSourceNode,
+    oldTargetNode,
+    edgeId,
+    nodeDataType
+  ) => {
+    // set new node
+
+    newMaxNodeId++;
+
+    const newNode = {
+      id: newMaxNodeId.toString(),
+      type: "mid-node",
+      data: {
+        label: `${nodeDataType} Node ${newMaxNodeId}`,
+        nodeDataType: nodeDataType,
+      },
+      style: { width: "200px", height: "50px" },
+      position: {
+        x: oldSourceNode.position.x,
+        y: oldSourceNode.position.y + 100,
+      },
+    };
+
+    // add node
+
+    setNodes((nds) => nds.concat(newNode));
+
+    // set new edge
+
+    // 기존 노드와 새로운 노드를 연결하는 엣지 추가, 완전 신규 엣지
+    const newEdge = {
+      source: newNode.id,
+      target: oldTargetNode.id,
+      type: nodeDataType === "Logic" ? "add-with-branch-edge" : "add-edge",
+      id: `xy-edge__${newNode.id}-${oldTargetNode.id}`,
+      deletable: false,
+      data: { onAddEdgeClick },
+    };
+
+    let newEdges = [];
+
+    setEdges((eds) => {
+      newEdges = [...eds, newEdge];
+      return [...eds, newEdge];
+    });
+
+    // set modified edge
+
+    newEdges = [...getEdges(), newEdge];
+
+    // 새로운 노드와 기존 타겟 노드를 연결하는 엣지 추가, 수정된 엣지
+    setEdges((eds) =>
+      eds.map((edge) => {
+        console.log(edge);
+        if (edge.id === edgeId) {
+          return {
+            ...edge,
+            source: oldSourceNode.id,
+            target: newNode.id,
+            id: `xy-edge__${oldSourceNode.id}-${newNode.id}`,
+            deletable: false,
+            data: { onAddEdgeClick },
+          };
+        }
+        return edge;
+      })
+    );
+    // reposition nodes
+    setNodes((nds) =>
+      nds.map((node) => {
+        if (
+          getChildrenNodes(oldSourceNode.id, nds, getEdges()).includes(
+            node.id
+          ) &&
+          node.id !== newNode.id
+        ) {
+          return {
+            ...node,
+            position: {
+              x: node.position.x,
+              y: node.position.y + 100,
+            },
+          };
+        }
+        return node;
+      })
+    );
+
+    return newMaxNodeId;
+  };
+
+  const addLogicNode = (newMaxNodeId, oldSourceNode, oldTargetNode, edgeId) => {
+    // set new nodes
+
+    const newNodes = [];
+    let newEdges = [];
+
+    // if oldTargetNode is a dummy end node, then we need to add a new dummy end node for children nodes.
+
+    newMaxNodeId++;
+
+    const newParentNode = {
+      id: newMaxNodeId.toString(),
+      type: "mid-node",
+      data: {
+        label: `Logic Node ${newMaxNodeId}`,
+        nodeDataType: "Logic-Parent",
+      },
+      style: { width: "200px", height: "50px" },
+      position: {
+        x: oldSourceNode.position.x,
+        y: oldSourceNode.position.y + 100,
+      },
+    };
+    newNodes.push(newParentNode);
+
+    newMaxNodeId++;
+
+    const newLeftNode = {
+      id: newMaxNodeId.toString(),
+      type: "mid-node",
+      data: {
+        label: `Logic Node ${newMaxNodeId}`,
+        nodeDataType: "Logic-Parent",
+      },
+      style: { width: "200px", height: "50px" },
+      position: {
+        x: newParentNode.position.x - 100,
+        y: newParentNode.position.y + 100,
+      },
+    };
+    newNodes.push(newLeftNode);
+
+    newMaxNodeId++;
+
+    // newRightNode의 위치는 newParentNode의 오른쪽에 위치
+    const newRightNode = {
+      id: newMaxNodeId.toString(),
+      type: "mid-node",
+      data: {
+        label: `Logic Node ${newMaxNodeId}`,
+        nodeDataType: "Logic-Parent",
+      },
+      style: { width: "200px", height: "50px" },
+      position: {
+        x: newParentNode.position.x + 100,
+        y: newParentNode.position.y + 100,
+      },
+    };
+    newNodes.push(newRightNode);
+
+    newMaxNodeId++;
+
+    const newRightEndNode = {
+      id: newMaxNodeId.toString(),
+      type: "dummy-end-node",
+      data: { label: `End Node ${newMaxNodeId}` },
+      deletable: false,
+      style: { borderRadius: "50%", width: "35px", height: "35px" },
+      position: {
+        x: newRightNode.position.x + 82.5,
+        y: newRightNode.position.y + 100,
+      },
+    };
+    newNodes.push(newRightEndNode);
+
+    // add new nodes
+    setNodes((nds) => nds.concat(newNodes));
+
+    // set edges
+    const newEdgesToAdd = [
+      {
+        source: newParentNode.id,
+        target: newLeftNode.id,
+        type: "bezier",
+        id: `xy-edge__${newParentNode.id}-${newLeftNode.id}`,
+        deletable: false,
+        data: { onAddEdgeClick },
+      },
+      {
+        source: newParentNode.id,
+        target: newRightNode.id,
+        type: "bezier",
+        id: `xy-edge__${newParentNode.id}-${newRightNode.id}`,
+        deletable: false,
+        data: { onAddEdgeClick },
+      },
+      {
+        source: newLeftNode.id,
+        target: oldTargetNode.id,
+        type: "add-edge",
+        id: `xy-edge__${newLeftNode.id}-${oldTargetNode.id}`,
+        deletable: false,
+        data: { onAddEdgeClick },
+      },
+      {
+        source: newRightNode.id,
+        target: newRightEndNode.id,
+        type: "add-edge",
+        id: `xy-edge__${newRightNode.id}-${newRightEndNode.id}`,
+        deletable: false,
+        data: { onAddEdgeClick },
+      },
+    ];
+
+    newEdges = [...getEdges(), ...newEdgesToAdd];
+
+    setEdges((eds) => {
+      return [...getEdges(), ...newEdgesToAdd];
+    });
+
+    console.log(newEdges);
+
+    setEdges((eds) =>
+      eds.map((edge) => {
+        if (edge.id === edgeId) {
+          return {
+            ...edge,
+            source: oldSourceNode.id,
+            target: newParentNode.id,
+            id: `xy-edge__${oldSourceNode.id}-${newParentNode.id}`,
+            deletable: false,
+            data: { onAddEdgeClick },
+          };
+        }
+        return edge;
+      })
+    );
+
+    // reposition nodes
+    setNodes((nds) =>
+      nds.map((node) => {
+        if (
+          getChildrenNodes(oldSourceNode.id, nds, newEdges).includes(node.id) &&
+          !newNodes.map((n) => n.id).includes(node.id)
+        ) {
+          return {
+            ...node,
+            position: {
+              x:
+                node.position.x +
+                (newLeftNode.position.x - oldSourceNode.position.x),
+              y:
+                node.position.y +
+                (newLeftNode.position.y - oldSourceNode.position.y),
+            },
+          };
+        }
+        return node;
+      })
+    );
+
+    return newMaxNodeId;
+  };
+
+  const addEndNode = (newMaxNodeId) => {
+    // add new end node
+
+    // set Edge
+
+
+    return newMaxNodeId;
+  }
 
   const onNodesDelete = useCallback(
     (deletedNodes) => {
@@ -220,26 +464,35 @@ function ReactFlowWindow() {
         const incomers = getIncomers(node, nodes, edges);
         const outgoers = getOutgoers(node, nodes, edges);
 
-        incomers.forEach((inNode) => {
-          getChildrenNodes(inNode.id).forEach((childNode) => {
-            moveNode(childNode.id, 0, -100);
-          });
-        });
+        // 바로 다음 노드가 dummy-end-node인 경우, 해당 노드를 삭제하고, 해당 노드와 연결된 엣지도 삭제
+        if (outgoers[0].type === "dummy-end-node") {
+          setEdges((eds) =>
+            eds.filter((edge) => edge.target !== outgoers[0].id)
+          );
 
-        setEdges((eds) =>
-          eds.concat(
-            incomers.flatMap(({ id: source }) =>
-              outgoers.map(({ id: target }) => ({
-                source,
-                target,
-                type: "add-edge",
-                id: `xy-edge__${source}-${target}`,
-                deletable: false,
-                data: { onAddEdgeClick },
-              }))
+          setNodes((nds) => nds.filter((n) => n.id !== outgoers[0].id));
+        } else {
+          incomers.forEach((inNode) => {
+            getChildrenNodes(inNode.id, nodes, edges).forEach((childNode) => {
+              moveNode(childNode.id, 0, -100);
+            });
+          });
+
+          setEdges((eds) =>
+            eds.concat(
+              incomers.flatMap(({ id: source }) =>
+                outgoers.map(({ id: target }) => ({
+                  source,
+                  target,
+                  type: "add-edge",
+                  id: `xy-edge__${source}-${target}`,
+                  deletable: false,
+                  data: { onAddEdgeClick },
+                }))
+              )
             )
-          )
-        );
+          );
+        }
       });
     },
     [nodes, edges, onAddEdgeClick, getChildrenNodes, moveNode]
@@ -277,7 +530,11 @@ function ReactFlowWindow() {
   return (
     <div style={{ height: "100%", width: "100%" }}>
       <Allotment ref={ref} defaultSizes={[100, 0]}>
-        <Allotment.Pane className="split-left-view" minSize={50} style={{ height: "50px" }}>
+        <Allotment.Pane
+          className="split-left-view"
+          minSize={50}
+          style={{ height: "50px" }}
+        >
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -294,21 +551,9 @@ function ReactFlowWindow() {
             fitView
           >
             <MiniMap />
+            <Panel />
             <Controls />
             <Background variant={BackgroundVariant.Cross} />
-            <Button
-              icon="add"
-              intent="primary"
-              onClick={addNode}
-              style={{
-                position: "absolute",
-                right: 10,
-                top: 10,
-                zIndex: 1000,
-              }}
-            >
-              Add Node
-            </Button>
             <Button
               intent="primary"
               onClick={exportToJson}
@@ -323,9 +568,21 @@ function ReactFlowWindow() {
             </Button>
           </ReactFlow>
         </Allotment.Pane>
-        <Allotment.Pane className="split-right-view" minSize={0} maxSize={500} style={{ overflow: "auto" }}>
-          <div className="menu-bar" style={{ overflow: "auto", height: "auto" }}>
-            <JSONPretty id="json-pretty" data={jsonData} style={{ overflow: "auto", height: "auto" }}></JSONPretty>
+        <Allotment.Pane
+          className="split-right-view"
+          minSize={0}
+          maxSize={500}
+          style={{ overflow: "auto" }}
+        >
+          <div
+            className="menu-bar"
+            style={{ overflow: "auto", height: "auto" }}
+          >
+            <JSONPretty
+              id="json-pretty"
+              data={jsonData}
+              style={{ overflow: "auto", height: "auto" }}
+            ></JSONPretty>
           </div>
         </Allotment.Pane>
       </Allotment>
